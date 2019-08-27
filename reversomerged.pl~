@@ -1,0 +1,486 @@
+% The game state will be represented by a list of 9 elements
+% board(_,_,_,_,_,.....,_,_,_,_) at the beginning (64 cases)
+
+:- dynamic board/1.
+%TaillePlateau(8). % Possible de paramétrer la tailler du plateau ?
+
+%%%%%%%%%%%%%%%%%%%% End of game %%%%%%%%%%%%%%%%%%%%
+%%% Calculate the number of points of a player across the board
+nbOfPoints([], _, 0).
+nbOfPoints([TBoard|QBoard], P, Nb) :- nonvar(TBoard),  TBoard == P, nbOfPoints(QBoard, P, Nb2), Nb is Nb2+1, !.
+nbOfPoints([_|QBoard], P, Nb) :- nbOfPoints(QBoard, P,Nb), !.
+
+%%% Defines if board is full : no move left for any player (get result for one player and then the other)
+isBoardFull(Board) :- casesJouables(Board, 0,'x', CasesJouablesX), !,
+length(CasesJouablesO, NbCasesJouablesO),
+NbCasesJouablesX is 0, casesJouables(Board, 0, 'o', CasesJouablesO), !,
+length(CasesJouablesX, NbCasesJouablesX), NbCasesJouablesO is 0.
+
+%%% Test if a Board is a draw or which player wins
+winner(Board, 'Egalite') :- nbOfPoints(Board, 'x', NbPointsX), nbOfPoints(Board, 'o', NbPointsO), NbPointsX == NbPointsO, !.
+winner(Board, P1) :- changePlayer(P1, P2),  nbOfPoints(Board, P1, NbPointsP1), nbOfPoints(Board, P2, NbPointsP2), NbPointsP1 > NbPointsP2, !.
+
+%%% GameOver if board is full and we have a winner
+gameover(Winner) :- board(Board), isBoardFull(Board), winner(Board, Winner), !.
+
+%Besoin : Fonction qui converti deux valeur I (0-7),J(0-7) en l'indice de la case du tableau 0-64
+%% X les colonnes
+%% Y les lignes
+coordXYtoVal(X,Y,Val) :- Val is X + Y * 8.
+coordValtoXY(X,Y,Val) :- X is Val mod 8, Y is Val div 8.
+
+%%%%%%%%%%%%%%%%%%%% Artificial intelligence %%%%%%%%%%%%%%%%%%%%
+
+%l'IA a le board, et le joueur dont elle se fiche pour l'instant : le 'is' récupère un nombre random (mais on pourrait avoir un truc plus compliqué), on récupère l'élement à cet endroit, si c'est une variable (donc non unifiée), on arrête la preuve.
+% Repeat propose toujours des choix, toujours vrai : relance toujours la preuve. (Donc on relance à chaque fois la relance de random())
+ia(Board, NumeroCase, Player) :-
+    casesJouables(Board, 0, Player, Liste),
+    iaCalcul(Board, NumeroCase, Player,Liste).
+
+iaCalcul(_, NumeroCase, _,ListeJouable) :-
+   length(ListeJouable,0),
+   NumeroCase = -1.
+iaCalcul(_, NumeroCase, _,ListeJouable) :-
+    length(ListeJouable,N),
+    repeat,
+    Index is random(N),
+    nth0(Index, ListeJouable, NumeroCase), !.
+
+%IA qui choisi la case qui donne le plus de points au tour actuel.
+%Board : le plateau, ValeurCase : l'indice de la case choisie par l'IA (sortie), Player : le joueur qui demande à l'IA de jouer.
+iaGreedyMax(Board, NumeroCase, Player) :-
+    casesJouables(Board, 0, Player, Liste),
+    iaGreedyMaxCalcul(Board, NumeroCase, Player,Liste).
+
+iaGreedyMaxCalcul(_, NumeroCase, _,ListeJouable) :-
+   length(ListeJouable,0),
+   NumeroCase = -1.
+iaGreedyMaxCalcul(Board, NumeroCase, Player, ListeJouable) :-
+    calculerGains(Board, ListeJouable, ListeGains, Player), % On calcul les gains de la liste passée en paramètre
+    maxListe(ListeGains, _, IndiceDuGainMax), % On récupère l'indice du max dans le tableau de gain
+    nth0(IndiceDuGainMax, ListeJouable, NumeroCase), !. % On récupère la valeur de la case jouable correspondante
+%%%%%%%%%%%%%%%%%%%% Clauses utiles pour une IA MIN MAX %%%%%%%%%%%%%%%%%%%%
+
+%Clause qui donne la valeur max et son indice dans une liste
+% Liste : la liste dans laquelle on chercher, ValueMax : la valeur max trouvée (sortie), Indice : l'indice de la valeur max dans la liste (sortie)
+maxListe(Liste, ValueMax, Indice) :-
+   max_list(Liste,ValueMax), %On récupère la valeur max
+   nth0(Indice, Liste, ValueMax). %On trouve son indice
+
+% Clause qui donne le max et son indice dans un tableau
+% Board : le plateau de jeu, Liste : la liste des indices pour lesquels ont veut connaître les gains associés, ListeGains : la liste des gains associés (même ordre) que la Liste des cases à tester, Index : l'indice de la case de la Liste à tester par lequel commencer (0 par défaut pour démarrer la récursion), Player : le joueur pour lequel on calcul les gains
+calculerGains(_,[],[],_).
+calculerGains(Board, [NumeroCaseAEvaluer|Queue], [GainOut|ListeGainsOUT], Player) :-
+    calculerGainUneCase(Board, NumeroCaseAEvaluer, Player,GainOut), %On calcul le gain de la case "NumeroCaseAEvaluer" du Board.
+    calculerGains(Board, Queue, ListeGainsOUT, Player),!. %On relance la récursivité
+
+%Clause qui calcule le gain d'un coup posé dans une case, pour un joueur donné.
+% Board : le plateau de jeu, IndiceCaseAEvaluer : le N° de la case où il faut évaluer le gain potentiel, Player : le joueur qui pourrait jouer à cet emplacement, GainOut (sortie) : la valeur potentiel de gain calculée.
+calculerGainUneCase(Board, IndiceCaseAEvaluer ,Player,GainOut) :-
+  %Pour chaque direction, on calcul le gain
+  calculerGainUneDirection(Board, IndiceCaseAEvaluer, 1, Player, GainOUT1),
+  calculerGainUneDirection(Board, IndiceCaseAEvaluer, -1, Player, GainOUT2),
+  calculerGainUneDirection(Board, IndiceCaseAEvaluer, 8, Player, GainOUT3),
+  calculerGainUneDirection(Board, IndiceCaseAEvaluer, -8, Player, GainOUT4),
+  calculerGainUneDirection(Board, IndiceCaseAEvaluer, 7, Player, GainOUT5),
+  calculerGainUneDirection(Board, IndiceCaseAEvaluer, -7, Player, GainOUT6),
+  calculerGainUneDirection(Board, IndiceCaseAEvaluer, 9, Player, GainOUT7),
+  calculerGainUneDirection(Board, IndiceCaseAEvaluer, -9, Player, GainOUT8),
+  GainOut is GainOUT1+GainOUT2+GainOUT3+GainOUT4+GainOUT5+GainOUT6+GainOUT7+GainOUT8,!. %On somme en résultat final
+
+%Clause qui calcule le gain d'un coup posé dans une case dans une direction donnée, pour un joueur donné.
+% Board : le plateau de jeu, IndiceInitial : l'index de la case où on considère le jeu, Incrément : la direction où on regarde le gain (+1,-1,..), Player, GainIN :
+calculerGainUneDirection(Board, IndiceCaseAEvaluer, Increment, Player, GainOUT) :-
+    subBoardRecursif(Board,IndiceCaseAEvaluer,Increment, L1), %On crée une sublist depuis la case du cran de droite, pour aller au bord
+    subListJusqueValINCLUS(L1,Player,L2), %On récupère la sous liste (de L1) jusqu'à la première case "vide" ou la première case à nous
+    member(Player,L2), %On vérifie si on a bien un jeton dans la liste, donc la case est jouable.
+    changePlayer(Player,Opposant), %On récupère la "valeur" d'un jeton opposant
+    nbOfPoints(L2,Opposant,GainOUT),!. % Calcul du nombre de case du type "Opponent" dans la liste en paramètre
+calculerGainUneDirection(Board, IndiceCaseAEvaluer, Increment, Player, GainOUT) :-
+    subBoardRecursif(Board,IndiceCaseAEvaluer,Increment, L1), %On crée une sublist depuis la case du cran de droite, pour aller au bord
+    subListJusqueValINCLUS(L1,Player,L2), %On récupère la sous liste (de L1) jusqu'à la première case "vide" ou la première case à nous
+    \+member(Player,L2), %On vérifie si on a bien aucun jeton dans la liste, donc la case est non-jouable.
+    GainOUT = 0. % Cette branche ne donnera donc aucun point (pas jouable)
+
+%%%%%%%%%%%%%%%%%%%% Clauses utiles pour obtenir liste des coups jouables pour un joueur %%%%%%%%%%%%%%%%%%%%
+
+% Coup à droite est il possible ? (Ps sortir du tableau, il y a bien un pion ennemi qui a une case vide à côté)
+% On veut qu'il nous sorte toutes les valeurs de NewINDEX jouable à patir de la case INDEX.
+%%% Board : le plateau de jeu, IndexCaseCourante : la case par laquelle on commence la recherche des cases jouables (0), Player : le joueur pour lequel on recherche les cases jouables, ListeCoupsJouables : la liste des coup qui peuvent être joué par le jour (sortie)
+casesJouables(_,64,_,[]).
+casesJouables(Board, IndexCaseCourante, Player, ListCoupsJouables) :-
+    coup(Board, IndexCaseCourante, Player),
+    append([IndexCaseCourante],NewListCoupsJouables,ListCoupsJouables),
+    IndexSuivant is IndexCaseCourante+1, % On incrémente pour aller voir à la case suivante
+    casesJouables(Board, IndexSuivant, Player, NewListCoupsJouables).
+casesJouables(Board, IndexCaseCourante, Player, ListCoupsJouables) :-
+    IndexSuivant is IndexCaseCourante+1, % On incrémente pour aller voir à la case suivante
+    casesJouables(Board, IndexSuivant, Player, ListCoupsJouables).
+
+
+% ==> On veut qu'il nous dise true si un coup dans la case Index est jouable, peu importe la case, pour ce player et ce board
+%%% Note : on vérifie les direction pour éviter des mauvaises détections.
+%Note, la ligne d'au dessus n'est pas prise en compte.
+%%% Board : le plateau de jeu, index : l'index de la case pour laquelle on veut savoir si elle est jouable, Player : le joueur qui doit hypothétiquement jouer à cette case
+coup(Board, Index, Player) :-
+    NewIndex is Index-1,
+    coordValtoXY(X,_,Index), %On récupère les coordonnées de la case actuelle.
+    X \== 0, %Si on est sur le bord gauche et qu'on va à gauche, on s'arrête
+    licite(Board, Index, NewIndex,Player),!. %Ennemi à droite ?
+coup(Board, Index, Player) :-
+    NewIndex is Index+1,
+    coordValtoXY(X,_,Index), %On récupère les coordonnées de la case actuelle.
+    X \== 7, %Si on est sur le bord droite et qu'on va à droite, on s'arrête
+    licite(Board, Index, NewIndex,Player),!. %Ennemi à droite ?
+coup(Board, Index, Player) :-
+    NewIndex is Index-8,
+    licite(Board, Index, NewIndex,Player),!. %Ennemi en haut ?
+coup(Board, Index, Player) :-
+    NewIndex is Index+8,
+    licite(Board, Index, NewIndex,Player),!. %Ennemi en bas ?
+coup(Board, Index, Player) :-
+    NewIndex is Index-9,
+    coordValtoXY(X,_,Index), %On récupère les coordonnées de la case actuelle.
+    X \== 0, %Si on est sur le bord gauche et qu'on va à gauche, on s'arrête
+    licite(Board, Index, NewIndex,Player),!. %Ennemi en haut à gauche ?
+coup(Board, Index, Player) :-
+    NewIndex is Index-7,
+    coordValtoXY(X,_,Index), %On récupère les coordonnées de la case actuelle.
+    X \== 7, %Si on est sur le bord droite et qu'on va à droite, on s'arrête
+    licite(Board, Index, NewIndex,Player),!. %Ennemi en haut à droite ?
+coup(Board, Index, Player) :-
+    NewIndex is Index+9,
+    coordValtoXY(X,_,Index), %On récupère les coordonnées de la case actuelle.
+    X \== 7, %Si on est sur le bord droite et qu'on va à droite, on s'arrête
+    licite(Board, Index, NewIndex,Player),!. %Ennemi en bas à droite ?
+coup(Board, Index, Player) :-
+    NewIndex is Index+7,
+    coordValtoXY(X,_,Index), %On récupère les coordonnées de la case actuelle.
+    X \== 0, %Si on est sur le bord gauche et qu'on va à gauche, on s'arrête
+    licite(Board, Index, NewIndex,Player),!. %Ennemi en bas à gauche ?
+
+% Coup est-il licite ? (La première case est-elle vide ? La case à côté a-t-elle un ennemi ? A-t-on un pion bien placé pour que la case puisse être utilisée ? => jouable)
+%% Le plateau de jeu est connu, NewIndex pointe sur une case vide (potentiellement), Index pointe sur une case ennemi (potentiellement), (Increment donne la direction,) Player donne le type du joueur
+% Board : le plateau, NewIndex : index de la case vide (où on veut potentiellement jouer), Index : Index d'une case ennemi adjacente à la case jouable, qui donne la direction dans laquelle on veut regarder, Player : le joueur
+licite(Board,NewIndex,Index,Player) :-
+    nth0(Index,Board,OriginalVal), %On récupère la valeur de la case sur la case initiale
+    nth0(NewIndex, Board, Val), %On récupère la valeur présente sur la case cible
+    var(Val), %Si la case cible c'est une variable, donc PAS un des deux joueurs = une case vide, elle pourrait être jouable
+    changePlayer(Player,Opposant), %On récupère la "valeur" d'un jeton opposant
+    OriginalVal == Opposant, %Si la case initiale est un opposant, on a donc une case libre potentiellement jouable
+    Increment is Index-NewIndex, %Note : on peut supprimer NewIndex ou Increment. Il faut la soustraction dans ce sens pour obtenir le (   -Increment)
+    subBoard(Board,Index,Increment, L1), %On crée une sublist depuis la case du cran de droite, pour aller au bord /sublist(NewIndex, Bord, L1)
+    %% ATTENTION L'INCREMENT DOIT ETRE INVERSE ! - INCREMENT Si on veut jouer à droite, on cherche la sous liste de gauche, donc on évolue à gauche.
+    % Note : Si on met l'NEWINDEX : on appelle subBoardRecursif (on met pas la case vide, dans la sublist)
+    % Note : SI on met l'INDEX : on appelle subBoard (on met la case ennemeni dans la sublist)
+    subListJusqueVide(L1,L2), %On récupère la sous liste de la case "à droite" jusqu'à la première case "vide"
+    member(Player,L2). %On vérifie si dans cette zone on a une case "à nous" (au player)
+
+%Fonction pour savoir si une case est au bord. (Sup, inf ou côtés)
+%% True si sur la première ou dernière ligne, ou première ou dernière colonne
+% Indice : l'index de la case où on veut savoir si elle est au bord, Increment : la direction dans laquelle on regarde si elle est au bord. Une case sur la colonne de gauche mais en regardant vers la droite ne sera pas "au bord".
+% La fonction raisonne en "Est-ce que si tu vas un coup plus loin (Increment) depuis ta case (Indice), tu sors du tableau ?"
+estAuBord(Indice,Increment) :- compare(=,Increment,-1),coordValtoXY(X,_,Indice), X == 0.
+estAuBord(Indice,Increment) :- compare(=,Increment,1),coordValtoXY(X,_,Indice), X == 7.
+estAuBord(Indice,Increment) :- compare(<,Increment,-6), coordValtoXY(_,Y,Indice), Y == 0. %Vérification si on va vers le bord haut : Notre incrément est soit -7, -8 ou -9 donc <-6
+estAuBord(Indice,Increment) :- compare(>,Increment,6),coordValtoXY(_,Y,Indice), Y == 7.  %Vérification si on va vers le bord haut : Notre incrément est soit +7, +8 ou +9 donc > 6
+%Cas particulier des bords droits et gauches
+estAuBord(Indice,Increment) :- compare(=,Increment,-7),coordValtoXY(X,_,Indice), X == 7.
+estAuBord(Indice,Increment) :- compare(=,Increment,+9),coordValtoXY(X,_,Indice), X == 7.
+estAuBord(Indice,Increment) :- compare(=,Increment,-9),coordValtoXY(X,_,Indice), X == 0.
+estAuBord(Indice,Increment) :- compare(=,Increment,+7),coordValtoXY(X,_,Indice), X == 0.
+
+%Pour trouver la première occurence
+% Note : non utilisée pour l'instant
+indexOf([Elem|_], Elem, 0).
+indexOf([_|Tail], Element, Index):-
+  indexOf(Tail, Element, I), % Check in the tail of the list
+  Index is I+1.  % and increment the resulting index
+
+% But : récupérer la liste de valeur, depuis "Index", dans la direction de "Incrément", jusqu'au bord le plus proche. En diagonale, en latérial ou en vertical
+% %Sortie : Dans Subboard, les valeurs dans l'ordre de Index (EXCLU!) au bord du tableau, en faisant des sauts de "Increment"
+%Board : le plateau de jeu, Index : L'indice de la case de départ qui servira à créer la liste extraite du plateau de jeu, Increment : la direction dans laquelle sera construite la liste, par rapport à la case de départ, Liste : la liste de sortie, qui sera constitué de tous les éléments entre la case (non incluse) de départ, et le premier bord rencontré (sortie)
+subBoardRecursif(_,Index,Increment,[]) :-
+    %Note : La notion de "bord" dépend de la direction dans laquelle on va (donc selon l'incrément ! ^_^ )
+    estAuBord(Index,Increment),!. % Condition d'arrêt : la case courante est sur le bord de la grille de jeu.
+
+subBoardRecursif(Board,Index,Increment,SubBoard) :- %La case courante n'est pas au bord (sinon on se serait arrêté)
+    NewIndex is Index+Increment, %Incrément de la valeur
+    nth0(NewIndex, Board, Val), % Récupère la valeur dans la case de N°"Index+1" du plateau de jeu
+    append([Val],NewSubBoard,SubBoard), %Ajout de cet élément à la SubBoard
+    subBoardRecursif(Board,NewIndex,Increment,NewSubBoard). %Récursion pour continue la création du Subboard.
+
+%Bidouille pour pouvoir avoir la liste complète des valeurs à avoir (avec la valeur à INDEX, si on n'en veut pas, on peut simplifier le code et/ou appeller directement subBoardRecursif)
+% Sortie : Dans Subboard, les valeurs dans l'ordre de Index (compris) au bord du tableau, en faisant des sauts de "Increment"
+%Board : le plateau de jeu, Index : L'indice de la case de départ qui servira à créer la liste extraite du plateau de jeu, Increment : la direction dans laquelle sera construite la liste, par rapport à la case de départ, Liste : la liste de sortie, qui sera constitué de tous les éléments entre la case (INCLUSE) de départ, et le premier bord rencontré (sortie)
+subBoard(Board,Index,Increment,SubBoard) :-
+    nth0(Index, Board, Val), % Récupère la valeur dans la case de N°"Index" du plateau de jeu
+    append([Val],NewSubBoard,SubBoard), %Ajout de cet élément à la SubBoard (   Ici, on ajoute le premier élément, celui à l'index INDEX )
+    subBoardRecursif(Board,Index,Increment,NewSubBoard). %Lancement de la récursion
+
+%subListJusqueVide : on coupe la liste donnée en paramètre jusqu'à la première case vide
+%% Liste1 : La liste qu'on veut réduire (IN), Liste2 : la liste réduite (L1) jusqu'à la rencontre avec une case vide (OUT)
+subListJusqueVide([],[]). %Condition d'arrêt si on tombe que sur des cases pleines
+subListJusqueVide([H|_], []) :- var(H). %Condition d'arrêt si on tombe sur une case vide
+subListJusqueVide([H|ListeEntree], [H|ListeSortie]) :- nonvar(H),subListJusqueVide(ListeEntree, ListeSortie). %Récusrion tant qu'on tombe sur des cases pleines (instanciées = pas de variable)
+
+%subListJusqueVal : on coupe la liste donnée en paramètre jusqu'à la première case vide ou case définie par "Player"
+%% Liste1 : La liste qu'on veut réduire (IN), Val : un valeur, qui si on tombe dessus dans la liste, arrête la création de la liste de sortie, Liste2 : la liste réduite (L1) jusqu'à la rencontre avec une case vide (OUT)
+subListJusqueValINCLUS([],_,[]). %Condition d'arrêt si on tombe que sur des cases pleines
+subListJusqueValINCLUS([H|_], _, []) :- var(H). %Condition d'arrêt si on tombe sur une case vide
+subListJusqueValINCLUS([H|_], Val, [H]) :- H==Val. %Condition d'arrêt si on tombe sur une case vide
+subListJusqueValINCLUS([H|ListeEntree], Val, [H|ListeSortie]) :- nonvar(H),subListJusqueValINCLUS(ListeEntree,Val, ListeSortie). %Récusrion tant qu'on tombe sur des cases pleines (instanciées = pas de variable)
+
+%%%%%%%%%%%%%%%%%%%% Clauses de jeu %%%%%%%%%%%%%%%%%%%%
+
+%%%% Recursive predicate for playing the game.
+%play(_):- gameover(Winner), !, write('Game is Over. Winner: '), writeln(Winner), displayBoard.
+%Si il y a un gagnant, on fait une coupure car partie terminée, affichage du gagnant, affichage du board.
+%%%% Play a Move, the new Board will be the same, but one value will be instanciated with the Move
+%% Move est l'index (commence à 0) du pion joué
+%% PRÉCONDITION : Move est un indice licite où le joueur peut jouer.
+playMove(Board,-1,Board,_).
+playMove(Board,Move,NewBoard,Player) :-
+    nth0(Move,Board,Player), % on place le pion joué à sa place (Move)
+    playMoveRight(Move, Player, Board, NewBoardR), % Direction droite on regarde (et remplace s'il faut)
+    playMoveDownRight(Move, Player, NewBoardR, NewBoardDR), % Direction droite on regarde (et remplace s'il faut)
+    playMoveDown(Move, Player, NewBoardDR, NewBoardD), % Direction droite on regarde (et remplace s'il faut)
+    playMoveDownLeft(Move, Player, NewBoardD, NewBoardDL), % Direction droite on regarde (et remplace s'il faut)
+    playMoveLeft(Move, Player, NewBoardDL, NewBoardL), % Direction droite on regarde (et remplace s'il faut)
+    playMoveUpLeft(Move, Player, NewBoardL, NewBoardUL), % Direction droite on regarde (et remplace s'il faut)
+    playMoveUp(Move, Player, NewBoardUL, NewBoardU), % Direction droite on regarde (et remplace s'il faut)
+    playMoveUpRight(Move, Player, NewBoardU, NewBoard), % Direction droite on regarde (et remplace s'il faut)
+    !. %
+    %playMoveUpRight(Move, Player, Board, NewBoard). %
+
+% RIGHT %
+playMoveRight(Move, _, Board, Board) :- coordValtoXY(X,_,Move), X > 6, !. % le pion est sur les deux colonnes les plus à droite -> pas possible de marquer vers la droite
+playMoveRight(Move, Player, Board, Board) :- Neighbour is Move+1, nth0(Neighbour, Board, Pion),(var(Pion);Pion==Player), !. % le voisin de droite est un ami OU une variable -> idem
+playMoveRight(Move, Player, Board, NewBoard) :- % recherche en profondeur et remplacement car on vient d'éliminer les cas évidents où on ne marque pas
+    subBoardRecursif(Board, Move, 1, SubBoard), % récupère la liste des cases dans cette direction
+    NextMove is Move + 1,
+    searchNReplace(NextMove, 1, SubBoard, Player, Board, NewBoard), % effetue le remplacement si il y a des points à marquer
+	!.
+playMoveRight(_, _, Board, Board). % règle toujours vraie, il faut encore regarder dans d'autres directions !
+
+
+% DOWNRIGHT %
+% On ne peut pas jouer au dessus
+playMoveDownRight(Move, _, Board, Board) :- coordValtoXY(X,Y,Move), X > 6, Y >6, !. % le pion est sur les deux colonnes les plus à droite ou en bas -> pas possible de marquer
+playMoveDownRight(Move, Player, Board, Board) :- Neighbour is Move+9, nth0(Neighbour, Board, Pion),(var(Pion);Pion==Player), !. % le voisin de droite est un ami OU une variable -> idem
+playMoveDownRight(Move, Player, Board, NewBoard) :- % recherche en profondeur et remplacement car on vient d'éliminer les cas évidents où on ne marque pas
+    subBoardRecursif(Board, Move, 9, SubBoard), % récupère la liste des cases dans cette direction
+    NextMove is Move + 9,
+    searchNReplace(NextMove, 9, SubBoard, Player, Board, NewBoard), % effetue le remplacement si il y a des points à marquer
+	!.
+playMoveDownRight(_, _, Board, Board). % règle toujours vraie, il faut encore regarder dans d'autres directions !
+
+
+% DOWN %
+playMoveDown(Move, _, Board, Board) :- coordValtoXY(_,Y,Move), Y > 6, !. % le pion est sur les deux lignes les plus en bas -> pas possible de marquer
+playMoveDown(Move, Player, Board, Board) :- Neighbour is Move+8, nth0(Neighbour, Board, Pion),(var(Pion);Pion==Player), !. % le voisin de droite est un ami OU une variable -> idem
+playMoveDown(Move, Player, Board, NewBoard) :- % recherche en profondeur et remplacement car on vient d'éliminer les cas évidents où on ne marque pas
+    subBoardRecursif(Board, Move, 8, SubBoard), % récupère la liste des cases dans cette direction
+    NextMove is Move + 8,
+    searchNReplace(NextMove, 8, SubBoard, Player, Board, NewBoard), % effetue le remplacement si il y a des points à marquer
+	!.
+playMoveDown(_, _, Board, Board). % règle toujours vraie, il faut encore regarder dans d'autres directions !
+
+
+% DOWNLEFT %
+playMoveDownLeft(Move, _, Board, Board) :- coordValtoXY(X,Y,Move), X < 2, Y > 6, !. % le pion est sur les deux lignes les plus en bas -> pas possible de marquer
+playMoveDownLeft(Move, Player, Board, Board) :- Neighbour is Move+7, nth0(Neighbour, Board, Pion),(var(Pion);Pion==Player), !. % le voisin de droite est un ami OU une variable -> idem
+playMoveDownLeft(Move, Player, Board, NewBoard) :- % recherche en profondeur et remplacement car on vient d'éliminer les cas évidents où on ne marque pas
+    subBoardRecursif(Board, Move, 7, SubBoard), % récupère la liste des cases dans cette direction
+    NextMove is Move + 7,
+    searchNReplace(NextMove, 7, SubBoard, Player, Board, NewBoard), % effetue le remplacement si il y a des points à marquer
+	!.
+playMoveDownLeft(_, _, Board, Board). % règle toujours vraie, il faut encore regarder dans d'autres directions !
+
+
+% LEFT %
+playMoveLeft(Move, _, Board, Board) :- coordValtoXY(X,_,Move), X < 2, !. % le pion est sur les deux lignes les plus en bas -> pas possible de marquer
+playMoveLeft(Move, Player, Board, Board) :- Neighbour is Move-1, nth0(Neighbour, Board, Pion),(var(Pion);Pion==Player), !. % le voisin de droite est un ami OU une variable -> idem
+playMoveLeft(Move, Player, Board, NewBoard) :- % recherche en profondeur et remplacement car on vient d'éliminer les cas évidents où on ne marque pas
+    subBoardRecursif(Board, Move, -1, SubBoard), % récupère la liste des cases dans cette direction
+    NextMove is Move + -1,
+    searchNReplace(NextMove, -1, SubBoard, Player, Board, NewBoard), % effetue le remplacement si il y a des points à marquer
+	!.
+playMoveLeft(_, _, Board, Board). % règle toujours vraie, il faut encore regarder dans d'autres directions !
+
+
+% UPLEFT %
+playMoveUpLeft(Move, _, Board, Board) :- coordValtoXY(X,Y,Move), X < 2, Y < 2, !. % le pion est sur les deux lignes les plus en bas -> pas possible de marquer
+playMoveUpLeft(Move, Player, Board, Board) :- Neighbour is Move-9, nth0(Neighbour, Board, Pion),(var(Pion);Pion==Player), !. % le voisin de droite est un ami OU une variable -> idem
+playMoveUpLeft(Move, Player, Board, NewBoard) :- % recherche en profondeur et remplacement car on vient d'éliminer les cas évidents où on ne marque pas
+    subBoardRecursif(Board, Move, -9, SubBoard), % récupère la liste des cases dans cette direction
+    NextMove is Move -9,
+    searchNReplace(NextMove, -9, SubBoard, Player, Board, NewBoard), % effetue le remplacement si il y a des points à marquer
+	!.
+playMoveUpLeft(_, _, Board, Board). % règle toujours vraie, il faut encore regarder dans d'autres directions !
+
+
+% UP %%
+playMoveUp(Move, _, Board, Board) :- coordValtoXY(_,Y,Move), Y < 2, !. % le pion est sur les deux lignes les plus en bas -> pas possible de marquer
+playMoveUp(Move, Player, Board, Board) :- Neighbour is Move-8, nth0(Neighbour, Board, Pion),(var(Pion);Pion==Player), !. % le voisin de droite est un ami OU une variable -> idem
+playMoveUp(Move, Player, Board, NewBoard) :- % recherche en profondeur et remplacement car on vient d'éliminer les cas évidents où on ne marque pas
+    subBoardRecursif(Board, Move, -8, SubBoard), % récupère la liste des cases dans cette direction
+    NextMove is Move -8,
+    searchNReplace(NextMove, -8, SubBoard, Player, Board, NewBoard), % effetue le remplacement si il y a des points à marquer
+	!.
+playMoveUp(_, _, Board, Board). % règle toujours vraie, il faut encore regarder dans d'autres directions !
+
+
+% UPRIGHT %
+playMoveUpRight(Move, _, Board, Board) :- coordValtoXY(X,Y,Move), X < 2, Y > 6, !. % le pion est sur les deux lignes les plus en bas -> pas possible de marquer
+playMoveUpRight(Move, Player, Board, Board) :- Neighbour is Move-7, nth0(Neighbour, Board, Pion),(var(Pion);Pion==Player), !. % le voisin de droite est un ami OU une variable -> idem
+playMoveUpRight(Move, Player, Board, NewBoard) :- % recherche en profondeur et remplacement car on vient d'éliminer les cas évidents où on ne marque pas
+    subBoardRecursif(Board, Move, -7, SubBoard), % récupère la liste des cases dans cette direction
+    NextMove is Move -7,
+    searchNReplace(NextMove, -7, SubBoard, Player, Board, NewBoard), % effetue le remplacement si il y a des points à marquer
+	!.
+playMoveUpRight(_, _, Board, Board). % règle toujours vraie, il faut encore regarder dans d'autres directions !
+
+
+replace([_|T], 0, X, [X|T]).
+replace([H|T], I, X, [H|R]):- I > -1, NI is I-1, replace(T, NI, X, R), !.
+replace(L, _, _, L).
+
+
+searchNReplace(_, _, [H|_], Player, Board, Board) :- nonvar(H), H==Player, !. % le pion est initialisé ET ami -> on marque des points !
+searchNReplace(Index, Pas, [H|T], Player, Board, FinalBoard) :-
+    nonvar(H), H\==Player, % Si le voisin est une case ennemie initialisée
+    NewIndex is Index + Pas, % on avance
+    searchNReplace(NewIndex, Pas, T, Player, Board, NewBoard), % On effectue la même recherche sur le voisin suivant -> descente en profondeur de l'arbre.
+    replace(NewBoard, Index, Player, FinalBoard), %  Ne s'exécute que si searchNReplace est vraie == on a rencontré un pion ami directement après une liste d'ennemis
+    % remplace le pion à l'index Index par un pion Player dans le board que nous a remonté l'appel précédent de SNR. Crée un nouveau board que l'on renvoie à l'appelant.
+    !.
+%On fait en sorte d'unifier les deux plateaux, et on utilise nth0 comme un setteur à un emplacement donné.
+
+%%%% Remove old board/save new on in the knowledge base
+applyIt(Board,NewBoard) :- retract(board(Board)), assert(board(NewBoard)).
+%Retract pour supprimer de la base de connaissance le fait du plateau courant, et assert permet de rajouter le nouveau plateau en mémoire.
+
+%%%% Predicate to get the next player
+changePlayer('x','o').
+changePlayer('o','x').
+%Inversion des joueurs
+
+%%%%%%%%%%%%%%%%%%%% Clauses PRINCIPALE du jeu %%%%%%%%%%%%%%%%%%%%
+play(_) :- gameover(Winner), !, write('Game is Over. Winner: '), writeln(Winner), displayBoard.
+
+% Play an IA versus itself
+play(Player):-  write('New turn for:'), writeln(Player), % Pour écrire le tour du joueur
+		board(Board), % instanciate the board from the knowledge base  % Récupère le board dans les faits du prog.
+	    displayBoard, % print it % Affichage du plateau
+        %ia(Board, Move,Player), % ask the AI for a move, that is, an index for the Player % choix du mouvement
+	    iaGreedyMax(Board, Move,Player),   %ask the IA the move (greedy, maximise gain for each turn)
+	    playMove(Board,Move,NewBoard,Player), % Play the move and get the result in a new Board % Fait le mouvement, unification sur l'ancien plateau
+		applyIt(Board, NewBoard), % Remove the old board from the KB and store the new one % Suppressionde l'ancien plateau de la mémoire, garde le nouveau
+	    changePlayer(Player,NextPlayer), % Change the player before next turn %
+        play(NextPlayer). % next turn!
+
+% Play an IA vs Human game
+playHuman(_) :- gameover(Winner), !, write('Game is Over. Winner: '), writeln(Winner), displayBoard.
+playHuman(Player):-  write('New turn for:'), writeln(Player), % Pour écrire le tour du joueur
+		board(Board), % instanciate the board from the knowledge base  % Récupère le board dans les faits du prog.
+	    displayBoard, % print it % Affichage du plateau
+	read_entry(Board,Player,Move), %Demande à l'humain son tour de jeu
+	    playMove(Board,Move,NewBoard,Player), % Play the move and get the result in a new Board % Fait le mouvement, unification sur l'ancien plateau
+		applyIt(Board, NewBoard), % Remove the old board from the KB and store the new one % Suppressionde l'ancien plateau de la mémoire, garde le nouveau
+	    changePlayer(Player,NextPlayer), % Change the player before next turn %
+        playIA(NextPlayer). % next turn!
+
+playIA(_) :- gameover(Winner), !, write('Game is Over. Winner: '), writeln(Winner), displayBoard.
+playIA(Player):-  write('New turn for:'), writeln(Player), % Pour écrire le tour du joueur
+		board(Board), % instanciate the board from the knowledge base  % Récupère le board dans les faits du prog.
+	    displayBoard, % print it % Affichage du plateau
+
+	%ia(Board, Move,Player), % ask the AI for a move, that is, an index for the Player % choix du mouvement
+	    iaGreedyMax(Board, Move,Player),   %ask the IA the move (greedy, maximise gain for each turn)
+
+	playMove(Board,Move,NewBoard,Player), % Play the move and get the result in a new Board % Fait le mouvement, unification sur l'ancien plateau
+		applyIt(Board, NewBoard), % Remove the old board from the KB and store the new one % Suppressionde l'ancien plateau de la mémoire, garde le nouveau
+	    changePlayer(Player,NextPlayer), % Change the player before next turn %
+        playHuman(NextPlayer). % next turn!
+
+% Play an IA-A vs IA-B
+playIAA(_) :- gameover(Winner), !, write('Game is Over. Winner: '), writeln(Winner), displayBoard.
+playIAA(Player):-  write('New turn for:'), writeln(Player), % Pour écrire le tour du joueur
+		board(Board), % instanciate the board from the knowledge base  % Récupère le board dans les faits du prog.
+	    displayBoard, % print it % Affichage du plateau
+
+	ia(Board, Move,Player), % ask the AI for a move, that is, an index for the Player % choix du mouvement
+	%    iaGreedyMax(Board, Move,Player),   %ask the IA the move (greedy, maximise gain for each turn)
+
+	playMove(Board,Move,NewBoard,Player), % Play the move and get the result in a new Board % Fait le mouvement, unification sur l'ancien plateau
+		applyIt(Board, NewBoard), % Remove the old board from the KB and store the new one % Suppressionde l'ancien plateau de la mémoire, garde le nouveau
+	    changePlayer(Player,NextPlayer), % Change the player before next turn %
+        playIAB(NextPlayer). % next turn!
+
+playIAB(_) :- gameover(Winner), !, write('Game is Over. Winner: '), writeln(Winner), displayBoard.
+playIAB(Player):-  write('New turn for:'), writeln(Player), % Pour écrire le tour du joueur
+		board(Board), % instanciate the board from the knowledge base  % Récupère le board dans les faits du prog.
+	    displayBoard, % print it % Affichage du plateau
+
+	%ia(Board, Move,Player), % ask the AI for a move, that is, an index for the Player % choix du mouvement
+	    iaGreedyMax(Board, Move,Player),   %ask the IA the move (greedy, maximise gain for each turn)
+
+	playMove(Board,Move,NewBoard,Player), % Play the move and get the result in a new Board % Fait le mouvement, unification sur l'ancien plateau
+		applyIt(Board, NewBoard), % Remove the old board from the KB and store the new one % Suppressionde l'ancien plateau de la mémoire, garde le nouveau
+	    changePlayer(Player,NextPlayer), % Change the player before next turn %
+        playIAA(NextPlayer). % next turn!
+
+%%%%%%%%%%%%%%%%%%%% Clauses de gestion d'utilisateur réel %%%%%%%%%%%%%%%%%%%%
+
+%Board : le plateau de jeu, Player : le joueur, X : la valeur retournée par la clause (entrée de l'utilisateur, sortie)
+read_entry(Board,Player,X) :-
+  casesJouables(Board, 0, Player, Liste), %On récupère les entrées possibles de l'utilisateur
+  write('Playable index : '),
+  nl, %New Line
+  printListe(Liste), %Affichage de la liste jouable
+  nl, %New Line
+  write('Please type number of the case you want to play [0-63]'),
+  repeat,
+  nl, %New Line
+  read(X),
+  integer(X), %Si c'est bien un entier
+  member(X,Liste).
+
+%Permet de printer la liste passée en paramètre, avec des espaces
+% Liste : la liste à printer à l'écran
+printListe([]).
+printListe([H|Liste]) :- write(H), write(' '),printListe(Liste).
+
+%%%%%%%%%%%%%%%%%%%% Clauses d'affichage %%%%%%%%%%%%%%%%%%%%
+
+%%%% Print the value of the board at index N:
+% if its a variable, print ? and x or o otherwise.
+printVal(N) :- board(B), nth0(N,B,Val), var(Val), write('?'), !.
+%Récupère plateau en mémoire, Vrai si val est la valeur de la liste B de la Nième position, si c'est une variable (non unifiée), on print, on coupe pour le pas afficher en double.
+printVal(N) :- board(B), nth0(N,B,Val), write(Val).
+
+%%%% Display the board
+displayBoard:-
+    writeln('*----------*'),
+    printVal(0),printVal(1),printVal(2),printVal(3),printVal(4),printVal(5),printVal(6),printVal(7),writeln(''),
+    printVal(8),printVal(9),printVal(10),printVal(11),printVal(12),printVal(13),printVal(14),printVal(15),writeln(''),
+    printVal(16),printVal(17),printVal(18),printVal(19),printVal(20),printVal(21),printVal(22),printVal(23),writeln(''),
+    printVal(24),printVal(25),printVal(26),printVal(27),printVal(28),printVal(29),printVal(30),printVal(31),writeln(''),
+    printVal(32),printVal(33),printVal(34),printVal(35),printVal(36),printVal(37),printVal(38),printVal(39),writeln(''),
+    printVal(40),printVal(41),printVal(42),printVal(43),printVal(44),printVal(45),printVal(46),printVal(47),writeln(''),
+    printVal(48),printVal(49),printVal(50),printVal(51),printVal(52),printVal(53),printVal(54),printVal(55),writeln(''),
+    printVal(56),printVal(57),printVal(58),printVal(59),printVal(60),printVal(61),printVal(62),printVal(63),writeln(''),
+    writeln('*----------*').
+
+%%%%%%%%%%%%%%%%%%%% Clauses de lancement du jeu %%%%%%%%%%%%%%%%%%%%
+placeFourFirstPoints(Board36) :- board(Board), placePoint(Board, 27, 'x', Board27), placePoint(Board27, 28, 'o', Board28), placePoint(Board28, 35, 'o', Board35), placePoint(Board35, 36, 'x', Board36).
+
+placePoint(Board, Index, Value, NewBoard) :- nth0(Index, Board, Value), Board=NewBoard.
+
+%%%%% Start the game!
+init :- length(Board,64), assert(board(Board)), placeFourFirstPoints(NewBoard), applyIt(Board, NewBoard), play('x').
+initHumanvsIA :- length(Board,64), assert(board(Board)), placeFourFirstPoints(NewBoard), applyIt(Board, NewBoard), playHuman('x').
+initIAvsIA :- length(Board,64), assert(board(Board)), placeFourFirstPoints(NewBoard), applyIt(Board, NewBoard), playIAA('x').
+
+%Initialisation du board (de taille 64), assert = mettre dans la base de connaissance, X commence la partie,

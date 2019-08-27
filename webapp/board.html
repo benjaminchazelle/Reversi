@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		
+		<title>Reversi</title>
+		
+		<link rel="stylesheet" href="/style.css" />		
+		
+	</head>
+	<body>
+
+		<h1 id="title">
+			<span>R</span>
+			<span class="reverted">3</span>
+			<span>V</span>
+			<span>3</span>
+			<span>R</span>
+			<span>5</span>
+			<span>1</span>
+		</h1>
+
+		<div id="loading">
+			Connecting to game server...
+		</div>
+
+		<div id="beginning" style="display:none;">
+			<select id="player1">
+				<option value="human">Human</option>
+				<option value="random">IA Random</option>
+				<option value="greedy">IA Greedy</option>
+				<option value="greedyValued">IA Greedy Valued</option>
+				<option value="greedyDepth2">IA Greedy Depth 2</option>
+				<option value="heuristicOneLevel">IA Heuristic One Level</option>
+				<option value="heuristicNlevels">IA Heuristic N Levels</option>
+				<option value="mc">IA MC</option>
+				<option value="mcts50">IA MCTS 50</option>
+			</select>
+			<b>versus</b>
+			<select id="player2">
+				<option value="human">Human</option>
+				<option value="random" selected>IA Random</option>
+				<option value="greedy">IA Greedy</option>
+				<option value="greedyDepth2">IA Greedy Depth 2</option>
+				<option value="greedyValued">IA Greedy Valued</option>
+				<option value="heuristicOneLevel">IA Heuristic One Level</option>
+				<option value="heuristicNlevels">IA Heuristic N Levels</option>
+				<option value="mc">IA MC</option>
+				<option value="mcts50">IA MCTS 50</option>
+			</select>
+			<button id="fight">Fight !</button>
+		</div>
+
+		<div id="game" style="display:none;">
+			<table align="center" id="board">
+			</table>
+			<div id="count"></div>
+		</div>
+
+		<script src="/socket.io/socket.io.js"></script>
+		<script src="/script.js"></script>
+	
+	</body>
+</html>
